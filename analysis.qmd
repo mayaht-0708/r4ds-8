@@ -59,8 +59,6 @@ accuracy <- joined |>
     .groups = "drop"
   )
 
-accuracy
-
 ggplot(accuracy, aes(x = time_bucket, y = mean_prediction_error, group = 1)) +
   geom_line() +
   geom_point() +
@@ -101,8 +99,6 @@ calibration <- joined |>
     n = n_distinct(market_id),
     .groups = "drop"
   )
-
-calibration
 
 ggplot(calibration, aes(x = predicted_probability, y = actual_rate, size = n)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
