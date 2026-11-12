@@ -1,0 +1,12 @@
+---
+title: "Prediction Markets"
+author: "Mayah"
+execute:
+  echo: false
+---
+
+```{r}
+#| message: false
+library(tidyverse)
+library(arrow)
+```
