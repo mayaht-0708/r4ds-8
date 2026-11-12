@@ -10,3 +10,109 @@ execute:
 library(tidyverse)
 library(arrow)
 ```
+
+```{r}
+#| cache: true
+history <- open_dataset("data/history.parquet")
+markets <- read_parquet("data/markets.parquet")
+groups <- read_parquet("data/groups.parquet")
+market_groups <- read_parquet("data/market_groups.parquet")
+
+joined <- history |>
+  collect() |>
+  left_join(markets |> select(market_id, outcome, resolved_at), by = "market_id") |>
+  mutate(
+    outcome_numeric = case_when(
+      outcome == "YES" ~ 1L,
+      outcome == "NO" ~ 0L,
+      TRUE ~ NA_integer_
+    ),
+    absolute_error = abs(probability - outcome_numeric),
+    days_to_resolution = as.integer(as.Date(substr(resolved_at, 1, 10)) - date),
+    horizon = case_when(
+      days_to_resolution > 90 ~ "More than 90 days",
+      days_to_resolution > 30 ~ "30 to 90 days",
+      days_to_resolution > 7 ~ "7 to 30 days",
+      days_to_resolution > 0 ~ "1 to 7 days",
+      days_to_resolution == 0 ~ "Final day",
+      TRUE ~ NA_character_
+    ),
+    horizon = factor(
+      horizon,
+      levels = c(
+        "More than 90 days",
+        "30 to 90 days",
+        "7 to 30 days",
+        "1 to 7 days",
+        "Final day"
+      )
+    )
+  )
+```
+
+```{r}
+accuracy <- joined |>
+  group_by(time_bucket = horizon) |>
+  summarise(
+    mean_prediction_error = mean(absolute_error, na.rm = TRUE),
+    snapshots = n(),
+    .groups = "drop"
+  )
+
+accuracy
+
+ggplot(accuracy, aes(x = time_bucket, y = mean_prediction_error, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Prediction markets get smarter near the deadline",
+    subtitle = "Mean absolute error in Manifold Markets forecasts, by days remaining",
+    x = "Time to resolution",
+    y = "Mean absolute error"
+  )
+```
+
+```{r}
+joined |>
+  filter(days_to_resolution == 0) |>
+  ggplot(aes(x = probability)) +
+  geom_histogram(binwidth = 0.05, boundary = 0) +
+  labs(
+    x = "Forecast probability",
+    y = "Number of snapshots"
+  )
+```
+
+```{r}
+calibration <- joined |>
+  filter(days_to_resolution == 0) |>
+  mutate(
+    probability_bin = cut(
+      probability,
+      breaks = seq(0, 1, by = 0.1),
+      labels = paste0(seq(0, 90, by = 10), "-", seq(10, 100, by = 10), "%"),
+      include.lowest = TRUE
+    )
+  ) |>
+  group_by(probability_bin) |>
+  summarise(
+    predicted_probability = mean(probability, na.rm = TRUE),
+    actual_rate = mean(outcome_numeric, na.rm = TRUE),
+    n = n_distinct(market_id),
+    .groups = "drop"
+  )
+
+calibration
+
+ggplot(calibration, aes(x = predicted_probability, y = actual_rate, size = n)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  geom_point() +
+  scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(
+    title = "High-probability final-day forecasts usually resolve YES",
+    x = "Mean predicted probability",
+    y = "Actual resolution rate",
+    size = "Markets in bin"
+  )
+```
